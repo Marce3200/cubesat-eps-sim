@@ -1,7 +1,7 @@
 """
-main.py — Orquestador: regenera todas las figuras finales del paper
-Corre: python src/main.py   (desde la raíz del proyecto)
-Salida: figures/final/*.pdf
+main.py — Orquestador bilingüe: regenera las figuras finales del paper
+Uso: ajustar IDIOMA ("en"/"es") y correr  python src/main.py
+Salida: figures/final_en/*.pdf  o  figures/final_es/*.pdf
 """
 import os
 import numpy as np
@@ -16,35 +16,65 @@ from lora import potencia_lora, CONFIG_LORA, duty_tx
 from escenarios_lora import ESCENARIOS, perfil_consumo_lora
 from panel import curva_iv
 
+# ================== CONFIGURACIÓN DE IDIOMA ==================
+IDIOMA = "en"        # "en" -> paper en inglés | "es" -> español
+
+T = {
+    "es": {
+        "tiempo_min": "Tiempo [min]", "tiempo_h": "Tiempo [h]",
+        "irradiancia": "Irradiancia [W/m²]",
+        "potencia": "Potencia [W]", "soc": "SOC [%]",
+        "tension": "Tensión [V]", "corriente": "Corriente [A]",
+        "pot_panel": "Potencia [W]",
+        "total": "Total", "eclipse": "Eclipse",
+        "dod": "Límite DoD 30%", "mpp": "MPP {:.2f} W",
+        "esc": {"Normal (50 paq/pase)": "Normal (50 paq/pase)",
+                "Emergencia (150 paq/pase)": "Emergencia (150 paq/pase)",
+                "Desastre (400 paq/pase)": "Desastre (400 paq/pase)"},
+        "caras": {"zenit": "zenit", "nadir": "nadir", "ram": "ram",
+                  "wake": "wake", "lado": "lateral"},
+    },
+    "en": {
+        "tiempo_min": "Time [min]", "tiempo_h": "Time [h]",
+        "irradiancia": "Irradiance [W/m²]",
+        "potencia": "Power [W]", "soc": "SOC [%]",
+        "tension": "Voltage [V]", "corriente": "Current [A]",
+        "pot_panel": "Power [W]",
+        "total": "Total", "eclipse": "Eclipse",
+        "dod": "30% DoD limit", "mpp": "MPP {:.2f} W",
+        "esc": {"Normal (50 paq/pase)": "Normal (50 pkt/pass)",
+                "Emergencia (150 paq/pase)": "Emergency (150 pkt/pass)",
+                "Desastre (400 paq/pase)": "Disaster (400 pkt/pass)"},
+        "caras": {"zenit": "zenith", "nadir": "nadir", "ram": "ram",
+                  "wake": "wake", "lado": "side"},
+    },
+}[IDIOMA]
+
 # --- Estilo IEEE ---
 plt.rcParams.update({
     "font.size": 8, "axes.titlesize": 8, "axes.labelsize": 8,
     "legend.fontsize": 6.5, "xtick.labelsize": 7, "ytick.labelsize": 7,
     "lines.linewidth": 1.2, "figure.dpi": 150,
 })
-ANCHO = 3.45          # [in] ancho de columna IEEE
-OUT = "figures/final"
+ANCHO = 3.45
+OUT = f"figures/final_{IDIOMA}"
 os.makedirs(OUT, exist_ok=True)
 
 # --- Corrección de fase: arrancar saliendo del eclipse ---
-TH_SALIDA = np.arcsin(R_TIERRA / R_ORBITA)          # ~68.1°
+TH_SALIDA = np.arcsin(R_TIERRA / R_ORBITA)
 T_OFFSET = TH_SALIDA / (2 * np.pi) * PERIODO
 
+
 def tiempos(n_orbitas, paso=10.0):
-    """Array de tiempo de simulación desplazado a la salida del eclipse."""
     t_plot = np.arange(0, n_orbitas * PERIODO, paso)
     return t_plot, t_plot + T_OFFSET
 
 
-def fig_eclipse():
-    t, ts = tiempos(3)
-    x, y, _ = posicion_satelite(ts)
-    ecl = en_eclipse(x, y)
-    fig, ax = plt.subplots(figsize=(ANCHO, 1.4))
-    ax.fill_between(t/60, 0, 1, where=~ecl, color="gold", alpha=0.6)
-    ax.fill_between(t/60, 0, 1, where=ecl, color="gray", alpha=0.6)
-    ax.set_xlabel("Tiempo [min]"); ax.set_yticks([])
-    fig.tight_layout(); fig.savefig(f"{OUT}/fig1_eclipse.pdf")
+def etiqueta_cara(nombre):
+    """'zenit  (+Z, 10x10)' -> 'zenith (+Z)' según idioma."""
+    base = nombre.split("(")[0].strip()
+    eje = nombre.split("(")[1].split(",")[0].strip()
+    return f"{T['caras'][base]} ({eje})"
 
 
 def fig_irradiancia():
@@ -52,9 +82,9 @@ def fig_irradiancia():
     G, ecl = irradiancia_por_cara(ts)
     fig, ax = plt.subplots(figsize=(ANCHO, 2.4))
     for nombre, g in G.items():
-        ax.plot(t/60, g, label=nombre.split("(")[0].strip())
+        ax.plot(t/60, g, label=etiqueta_cara(nombre))
     ax.fill_between(t/60, 0, G_SOLAR, where=ecl, color="gray", alpha=0.2)
-    ax.set_xlabel("Tiempo [min]"); ax.set_ylabel("Irradiancia [W/m²]")
+    ax.set_xlabel(T["tiempo_min"]); ax.set_ylabel(T["irradiancia"])
     ax.legend(ncol=3, loc="upper center", bbox_to_anchor=(0.5, -0.32))
     fig.tight_layout(); fig.savefig(f"{OUT}/fig2_irradiancia.pdf")
 
@@ -65,10 +95,10 @@ def fig_potencia():
     fig, ax = plt.subplots(figsize=(ANCHO, 2.4))
     for nombre, p in P.items():
         if p.max() > 0:
-            ax.plot(t/60, p, label=nombre.split("(")[0].strip())
-    ax.plot(t/60, P_tot, "k", lw=1.6, label="Total")
+            ax.plot(t/60, p, label=etiqueta_cara(nombre))
+    ax.plot(t/60, P_tot, "k", lw=1.6, label=T["total"])
     ax.fill_between(t/60, 0, 11, where=ecl, color="gray", alpha=0.2)
-    ax.set_xlabel("Tiempo [min]"); ax.set_ylabel("Potencia [W]")
+    ax.set_xlabel(T["tiempo_min"]); ax.set_ylabel(T["potencia"])
     ax.legend(ncol=2, loc="upper center", bbox_to_anchor=(0.5, -0.32))
     fig.tight_layout(); fig.savefig(f"{OUT}/fig3_potencia.pdf")
 
@@ -84,11 +114,11 @@ def fig_soc_base():
     ax.plot(t/60, soc*100, color="tab:blue")
     ax.fill_between(t/60, 0, 100, where=ecl, color="gray", alpha=0.2)
     ax.axhline(70, color="tab:orange", ls="--", lw=0.9)
-    ax.set_xlabel("Tiempo [min]"); ax.set_ylabel("SOC [%]")
+    ax.set_xlabel(T["tiempo_min"]); ax.set_ylabel(T["soc"])
     ax.set_ylim(60, 102)
     fig.tight_layout(); fig.savefig(f"{OUT}/fig4_soc_base.pdf")
-    print(f"  Caso base : SOC final {100*soc[-1]:5.1f} %, "
-          f"mínimo {100*soc.min():5.1f} %")
+    print(f"  Base: SOC final {100*soc[-1]:5.1f} %, "
+          f"min {100*soc.min():5.1f} %")
 
 
 def fig_soc_escenarios():
@@ -100,40 +130,89 @@ def fig_soc_escenarios():
     for nombre, paq in ESCENARIOS.items():
         P_lora = potencia_lora(ts, paq)
         soc = simular_soc(ts, P_gen, perfil_consumo_lora(ts, P_lora))
-        ax.plot(t/3600, soc*100, label=nombre)
-        print(f"  {nombre:28s}: SOC final {100*soc[-1]:5.1f} %, "
-              f"mínimo {100*soc.min():5.1f} %")
+        ax.plot(t/3600, soc*100, label=T["esc"][nombre])
+        print(f"  {T['esc'][nombre]:28s}: final {100*soc[-1]:5.1f} %, "
+              f"min {100*soc.min():5.1f} %")
     ax.fill_between(t/3600, 0, 100, where=ecl, color="gray", alpha=0.2)
-    ax.axhline(70, color="tab:orange", ls="--", lw=0.9)
-    ax.set_xlabel("Tiempo [h]"); ax.set_ylabel("SOC [%]")
+    ax.axhline(70, color="tab:orange", ls="--", lw=0.9, label=T["dod"])
+    ax.set_xlabel(T["tiempo_h"]); ax.set_ylabel(T["soc"])
     ax.set_ylim(60, 102)
-    ax.legend(ncol=3, loc="upper center", bbox_to_anchor=(0.5, -0.35))
+    ax.legend(ncol=4, loc="upper center", bbox_to_anchor=(0.5, -0.35))
     fig.tight_layout(); fig.savefig(f"{OUT}/fig5_soc_escenarios.pdf")
 
-
+def fig_geometria():
+    from matplotlib.patches import Rectangle, Circle
+    fig, ax = plt.subplots(figsize=(ANCHO, 2.7))
+    Re = 1.0
+    r_orb = 1.6                      # exagerado para legibilidad
+    lim = r_orb * 1.30
+    # Sombra cilíndrica (lado anti-solar)
+    ax.add_patch(Rectangle((0, -Re), lim, 2*Re, color="gray",
+                           alpha=0.25, zorder=0))
+    ax.text(lim*0.98, Re*1.10, "cylindrical\nshadow",
+            fontsize=7, color="gray", ha="right")
+    # Tierra
+    ax.add_patch(Circle((0, 0), Re, color="tab:blue", zorder=2))
+    ax.text(0, 0, "Earth", ha="center", va="center",
+            color="white", fontsize=8, zorder=3)
+    # Órbita
+    ax.add_patch(Circle((0, 0), r_orb, fill=False, ls="--",
+                        color="gray", lw=0.9, zorder=1))
+    ax.text(0, -r_orb*1.12, "500 km orbit (not to scale)",
+            fontsize=7, color="gray", ha="center")
+    # Flechas de sol
+    for yy in np.linspace(-lim*0.55, lim*0.55, 3):
+        ax.annotate("", xy=(-lim*0.80, yy), xytext=(-lim*1.02, yy),
+                    arrowprops=dict(arrowstyle="->", color="orange"))
+    ax.text(-lim*1.00, lim*0.78, "Sun", color="orange", fontsize=8)
+    # Satélite en cuadrante superior derecho, con vector nadir
+    th = 0.9
+    sx, sy = r_orb*np.cos(th), r_orb*np.sin(th)
+    ax.plot([sx], [sy], marker="s", ms=7, color="goldenrod", zorder=4)
+    ax.annotate("", xy=(sx*0.62, sy*0.62), xytext=(sx*0.94, sy*0.94),
+                arrowprops=dict(arrowstyle="->", lw=0.9))
+    ax.text(sx*1.10, sy*1.14, "3U CubeSat\n(nadir pointing)",
+            fontsize=7, ha="left")
+    # Ángulo theta: arco desde el punto anti-solar (+X) al satélite
+    from matplotlib.patches import Arc
+    ax.add_patch(Arc((0, 0), r_orb*0.9, r_orb*0.9, angle=0,
+                     theta1=0, theta2=np.degrees(th),
+                     color="black", lw=0.8))
+    ax.annotate("", xy=(r_orb*0.45*np.cos(th*0.95),
+                        r_orb*0.45*np.sin(th*0.95)),
+                xytext=(r_orb*0.45*np.cos(th*0.75),
+                        r_orb*0.45*np.sin(th*0.75)),
+                arrowprops=dict(arrowstyle="->", lw=0.8))
+    ax.plot([0, r_orb], [0, 0], color="black", lw=0.6, ls=":")
+    ax.text(r_orb*0.55*np.cos(th/2), r_orb*0.50*np.sin(th/2),
+            r"$\theta$", fontsize=10)
+    ax.set_xlim(-lim*1.15, lim*1.15); ax.set_ylim(-lim, lim)
+    ax.set_aspect("equal"); ax.axis("off")
+    fig.tight_layout(); fig.savefig(f"{OUT}/fig0_geometry.pdf")
+    
 def fig_panel():
     V, I, P = curva_iv()
     k = int(np.argmax(P))
     fig, ax1 = plt.subplots(figsize=(ANCHO, 2.4))
     ax1.plot(V, I, color="tab:blue")
-    ax1.set_xlabel("Tensión [V]")
-    ax1.set_ylabel("Corriente [A]", color="tab:blue")
+    ax1.set_xlabel(T["tension"])
+    ax1.set_ylabel(T["corriente"], color="tab:blue")
     ax2 = ax1.twinx()
     ax2.plot(V, P, color="tab:red")
-    ax2.set_ylabel("Potencia [W]", color="tab:red")
+    ax2.set_ylabel(T["pot_panel"], color="tab:red")
     ax1.plot(V[k], I[k], "ko", ms=4)
-    ax2.annotate(f"MPP {P[k]:.2f} W", xy=(V[k], P[k]),
+    ax2.annotate(T["mpp"].format(P[k]), xy=(V[k], P[k]),
                  xytext=(0.4, P[k]*0.92),
                  arrowprops=dict(arrowstyle="->", lw=0.7))
     fig.tight_layout(); fig.savefig(f"{OUT}/fig6_panel_iv.pdf")
 
 
 if __name__ == "__main__":
-    print("Generando figuras finales en", OUT)
-    fig_eclipse()
+    print(f"Generando figuras [{IDIOMA}] en {OUT}")
     fig_irradiancia()
     fig_potencia()
     fig_soc_base()
     fig_soc_escenarios()
     fig_panel()
+    fig_geometria()
     print("Listo:", len(os.listdir(OUT)), "figuras.")
